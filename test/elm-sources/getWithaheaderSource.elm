@@ -1,10 +1,11 @@
 module GetWithAHeaderSource exposing (..)
 
 import Http
+import String.Conversions as String
 import Json.Decode exposing (..)
 
 
-getWithaheader : Maybe (String) -> Maybe (Int) -> String -> Int -> Http.Request (String)
+getWithaheader : Maybe (String) -> Maybe (Int) -> String -> Int -> Http.Request (Http.Response String)
 getWithaheader header_myStringHeader header_MyIntHeader header_MyRequiredStringHeader header_MyRequiredIntHeader =
     Http.request
         { method =
@@ -24,7 +25,11 @@ getWithaheader header_myStringHeader header_MyIntHeader header_MyRequiredStringH
         , body =
             Http.emptyBody
         , expect =
-            Http.expectJson string
+            Http.expectStringResponse
+                (\response ->
+                    Result.map
+                        (\body -> { response | body = body })
+                        (decodeString string response.body))
         , timeout =
             Nothing
         , withCredentials =
