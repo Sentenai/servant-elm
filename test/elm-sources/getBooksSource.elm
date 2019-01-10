@@ -22,10 +22,10 @@ getBooks toMsg query_published query_sort query_year query_category query_filter
                     |> Maybe.map (String.fromInt >>Url.percentEncode >> (++) "year=")
                     |> Maybe.withDefault ""
                 , Just query_category
-                    |> Maybe.map (Http.encodeUri >> (++) "category=")
+                    |> Maybe.map (Url.percentEncode >> (++) "category=")
                     |> Maybe.withDefault ""
                 , query_filters
-                    |> List.map (\val -> "filters[]=" ++ (val |> Maybe.map (String.fromBool) |> Maybe.withDefault "" |> Url.percentEncode))
+                    |> List.map (\val -> "filters[]=" ++ (val |> Maybe.map (String.fromBool) >> Maybe.withDefault "" |> Url.percentEncode))
                     |> String.join "&"
                 ]
     in

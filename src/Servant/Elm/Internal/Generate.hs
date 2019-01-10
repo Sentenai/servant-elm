@@ -336,9 +336,16 @@ mkLetParams opts request =
           let
             toStringSrc' = toStringSrc ">>" opts (qarg ^. F.queryArgName . F.argType)
           in
-              elmName <$>
-              indent 4 ("|> Maybe.map" <+> parens (toStringSrc' <> "Url.percentEncode >> (++)" <+> dquotes (name <> equals)) <$>
-                        "|> Maybe.withDefault" <+> dquotes empty)
+            case qarg ^. F.queryArgName . F.argType of
+               ElmPrimitive (EMaybe innerArgType) ->
+                elmName <$>
+                indent 4 ("|> Maybe.map" <+> parens (toStringSrc ">>" opts innerArgType <> "Url.percentEncode >> (++)" <+> dquotes (name <> equals)) <$>
+                          "|> Maybe.withDefault" <+> dquotes empty)
+
+               _ ->
+                "Just" <+> elmName <$>
+                indent 4 ("|> Maybe.map" <+> parens (toStringSrc' <> "Url.percentEncode >> (++)" <+> dquotes (name <> equals)) <$>
+                          "|> Maybe.withDefault" <+> dquotes empty)
 
         F.Flag ->
             "if" <+> elmName <+> "then" <$>
@@ -387,24 +394,27 @@ mkRequest opts request =
       let headerName = header ^. F.headerArg . F.argName . to (stext . F.unPathSegment)
           headerArgName = elmHeaderArg header
           argType = header ^. F.headerArg . F.argType
-          wrapped = isElmMaybeType argType
-          toStringSrc =
-            if isElmMaybeStringType opts argType || isElmStringType opts argType then
-              mempty
-            else
-              " << toString"
+          toStringSrc' =
+            if isElmStringType opts argType || isElmMaybeStringType opts argType
+            then ""
+            else "<< "
+            <>
+              (toStringSrc "" opts $
+                case argType of
+                  ElmPrimitive (EMaybe innerArgType) ->
+                     innerArgType
+
+                  _ -> argType)
+
       in
-        "Maybe.map" <+> parens (("Http.header" <+> dquotes headerName <> toStringSrc))
+        "Maybe.map" <+> parens (("Http.header" <+> dquotes headerName <+> toStringSrc'))
         <+>
-        (if wrapped then headerArgName else parens ("Just" <+> headerArgName))
+        (if isElmMaybeType argType then headerArgName else parens ("Just" <+> headerArgName))
 
     headers =
-        [ "Http.header" <+> dquotes headerName <+>
-            parens (toStringSrc "" opts (header ^. F.headerArg . F.argType) <> headerArgName)
+        [ mkHeader header
         | header <- request ^. F.reqHeaders
         , isNotCookie header
-        , headerName <- [header ^. F.headerArg . F.argName . to (stext . F.unPathSegment)]
-        , headerArgName <- [elmHeaderArg header]
         ]
 
     url =
@@ -526,7 +536,7 @@ toStringSrc operator opts argType
 
 
 toStringSrcTypes :: T.Text -> ElmOptions -> ElmDatatype -> T.Text
-toStringSrcTypes operator opts (ElmPrimitive (EMaybe argType)) = "Maybe.map (" <> toStringSrcTypes operator opts argType <> ") |> Maybe.withDefault \"\""
+toStringSrcTypes operator opts (ElmPrimitive (EMaybe argType)) = "Maybe.map (" <> toStringSrcTypes operator opts argType <> ") >> Maybe.withDefault \"\""
  -- [Char] == String so we can just use identity here.
  -- We can't return `""` here, because this string might be nested in a `Maybe` or `List`.
 toStringSrcTypes _ _ (ElmPrimitive (EList (ElmPrimitive EChar))) = "identity"
