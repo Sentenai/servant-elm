@@ -17,8 +17,8 @@ decodeBook =
     succeed Book
         |> required "name" string
 
-getBooksByBookId : Int -> Http.Request (Http.Response (Book))
-getBooksByBookId capture_bookId =
+getBooksByBookId : (Result (Maybe (Http.Metadata, String), Http.Error) (Book) -> msg) -> Int -> Cmd msg
+getBooksByBookId toMsg capture_bookId =
     Http.request
         { method =
             "GET"
@@ -33,14 +33,20 @@ getBooksByBookId capture_bookId =
         , body =
             Http.emptyBody
         , expect =
-            Http.expectStringResponse
+            Http.expectStringResponse toMsg
                 (\res ->
-                    Result.mapError Json.Decode.errorToString
-                        (Result.map
-                            (\body_ -> { url = res.url, status = res.status, headers = res.headers, body = body_ })
-                            (decodeString decodeBook res.body)))
+                    case res of
+                        Http.BadUrl_ url -> Err (Nothing, Http.BadUrl url)
+                        Http.Timeout_ -> Err (Nothing, Http.Timeout)
+                        Http.NetworkError_ -> Err (Nothing, Http.NetworkError)
+                        Http.BadStatus_ metadata body_ -> Err (Just (metadata, body_), Http.BadStatus metadata.statusCode)
+                        Http.GoodStatus_ metadata body_ ->
+                            (decodeString decodeBook body_)
+                                |> Result.mapError Json.Decode.errorToString
+                                |> Result.mapError Http.BadBody
+                                |> Result.mapError (Tuple.pair (Just (metadata, body_))))
         , timeout =
             Nothing
-        , withCredentials =
-            False
+        , tracker =
+            Nothing
         }

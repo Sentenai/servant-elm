@@ -7,6 +7,7 @@ import Http
 import String.Conversions as String
 import Url
 
+
 type alias Response =
     { origin : String
     }
@@ -61,8 +62,8 @@ decodeResponseWithArgs =
     succeed ResponseWithArgs
         |> required "args" decodeQueryArgs
 
-getIp : Http.Request (Http.Response (Response))
-getIp =
+getIp : (Result (Maybe (Http.Metadata, String), Http.Error) (Response) -> msg) -> Cmd msg
+getIp toMsg =
     Http.request
         { method =
             "GET"
@@ -76,20 +77,26 @@ getIp =
         , body =
             Http.emptyBody
         , expect =
-            Http.expectStringResponse
+            Http.expectStringResponse toMsg
                 (\res ->
-                    Result.mapError Json.Decode.errorToString
-                        (Result.map
-                            (\body_ -> { url = res.url, status = res.status, headers = res.headers, body = body_ })
-                            (decodeString decodeResponse res.body)))
+                    case res of
+                        Http.BadUrl_ url -> Err (Nothing, Http.BadUrl url)
+                        Http.Timeout_ -> Err (Nothing, Http.Timeout)
+                        Http.NetworkError_ -> Err (Nothing, Http.NetworkError)
+                        Http.BadStatus_ metadata body_ -> Err (Just (metadata, body_), Http.BadStatus metadata.statusCode)
+                        Http.GoodStatus_ metadata body_ ->
+                            (decodeString decodeResponse body_)
+                                |> Result.mapError Json.Decode.errorToString
+                                |> Result.mapError Http.BadBody
+                                |> Result.mapError (Tuple.pair (Just (metadata, body_))))
         , timeout =
             Nothing
-        , withCredentials =
-            False
+        , tracker =
+            Nothing
         }
 
-getStatus204 : Http.Request (Http.Response (NoContent))
-getStatus204 =
+getStatus204 : (Result (Maybe (Http.Metadata, String), Http.Error) (NoContent) -> msg) -> Cmd msg
+getStatus204 toMsg =
     Http.request
         { method =
             "GET"
@@ -104,21 +111,27 @@ getStatus204 =
         , body =
             Http.emptyBody
         , expect =
-            Http.expectStringResponse
+            Http.expectStringResponse toMsg
                 (\res ->
-                    if String.isEmpty res.body then
-                        Ok { url = res.url, status = res.status, headers = res.headers, body = NoContent }
-                    else
-                        Err "Expected the response body to be empty"
-                )
+                    case res of
+                        Http.BadUrl_ url -> Err (Nothing, Http.BadUrl url)
+                        Http.Timeout_ -> Err (Nothing, Http.Timeout)
+                        Http.NetworkError_ -> Err (Nothing, Http.NetworkError)
+                        Http.BadStatus_ metadata body_ -> Err (Just (metadata, body_), Http.BadStatus metadata.statusCode)
+                        Http.GoodStatus_ metadata body_ ->
+                            if String.isEmpty body_ then
+                                Ok (NoContent)
+                            else
+                                Err (Just (metadata, body_), Http.BadBody <| "Expected the response body to be empty, but it was '" ++ body_ ++ "'.")
+                            )
         , timeout =
             Nothing
-        , withCredentials =
-            False
+        , tracker =
+            Nothing
         }
 
-postPost : MessageBody -> Http.Request (Http.Response (ResponseWithJson))
-postPost body =
+postPost : (Result (Maybe (Http.Metadata, String), Http.Error) (ResponseWithJson) -> msg) -> MessageBody -> Cmd msg
+postPost toMsg body =
     Http.request
         { method =
             "POST"
@@ -132,20 +145,26 @@ postPost body =
         , body =
             Http.jsonBody (encodeMessageBody body)
         , expect =
-            Http.expectStringResponse
+            Http.expectStringResponse toMsg
                 (\res ->
-                    Result.mapError Json.Decode.errorToString
-                        (Result.map
-                            (\body_ -> { url = res.url, status = res.status, headers = res.headers, body = body_ })
-                            (decodeString decodeResponseWithJson res.body)))
+                    case res of
+                        Http.BadUrl_ url -> Err (Nothing, Http.BadUrl url)
+                        Http.Timeout_ -> Err (Nothing, Http.Timeout)
+                        Http.NetworkError_ -> Err (Nothing, Http.NetworkError)
+                        Http.BadStatus_ metadata body_ -> Err (Just (metadata, body_), Http.BadStatus metadata.statusCode)
+                        Http.GoodStatus_ metadata body_ ->
+                            (decodeString decodeResponseWithJson body_)
+                                |> Result.mapError Json.Decode.errorToString
+                                |> Result.mapError Http.BadBody
+                                |> Result.mapError (Tuple.pair (Just (metadata, body_))))
         , timeout =
             Nothing
-        , withCredentials =
-            False
+        , tracker =
+            Nothing
         }
 
-getGet : Maybe (String) -> Http.Request (Http.Response (ResponseWithArgs))
-getGet query_q =
+getGet : (Result (Maybe (Http.Metadata, String), Http.Error) (ResponseWithArgs) -> msg) -> Maybe (String) -> Cmd msg
+getGet toMsg query_q =
     let
         params =
             List.filter (not << String.isEmpty)
@@ -171,20 +190,26 @@ getGet query_q =
             , body =
                 Http.emptyBody
             , expect =
-                Http.expectStringResponse
+                Http.expectStringResponse toMsg
                     (\res ->
-                        Result.mapError Json.Decode.errorToString
-                            (Result.map
-                                (\body_ -> { url = res.url, status = res.status, headers = res.headers, body = body_ })
-                                (decodeString decodeResponseWithArgs res.body)))
+                        case res of
+                            Http.BadUrl_ url -> Err (Nothing, Http.BadUrl url)
+                            Http.Timeout_ -> Err (Nothing, Http.Timeout)
+                            Http.NetworkError_ -> Err (Nothing, Http.NetworkError)
+                            Http.BadStatus_ metadata body_ -> Err (Just (metadata, body_), Http.BadStatus metadata.statusCode)
+                            Http.GoodStatus_ metadata body_ ->
+                                (decodeString decodeResponseWithArgs body_)
+                                    |> Result.mapError Json.Decode.errorToString
+                                    |> Result.mapError Http.BadBody
+                                    |> Result.mapError (Tuple.pair (Just (metadata, body_))))
             , timeout =
                 Nothing
-            , withCredentials =
-                False
+            , tracker =
+                Nothing
             }
 
-getByPath : String -> Http.Request (Http.Response (Response))
-getByPath capture_path =
+getByPath : (Result (Maybe (Http.Metadata, String), Http.Error) (Response) -> msg) -> String -> Cmd msg
+getByPath toMsg capture_path =
     Http.request
         { method =
             "GET"
@@ -198,14 +223,20 @@ getByPath capture_path =
         , body =
             Http.emptyBody
         , expect =
-            Http.expectStringResponse
+            Http.expectStringResponse toMsg
                 (\res ->
-                    Result.mapError Json.Decode.errorToString
-                        (Result.map
-                            (\body_ -> { url = res.url, status = res.status, headers = res.headers, body = body_ })
-                            (decodeString decodeResponse res.body)))
+                    case res of
+                        Http.BadUrl_ url -> Err (Nothing, Http.BadUrl url)
+                        Http.Timeout_ -> Err (Nothing, Http.Timeout)
+                        Http.NetworkError_ -> Err (Nothing, Http.NetworkError)
+                        Http.BadStatus_ metadata body_ -> Err (Just (metadata, body_), Http.BadStatus metadata.statusCode)
+                        Http.GoodStatus_ metadata body_ ->
+                            (decodeString decodeResponse body_)
+                                |> Result.mapError Json.Decode.errorToString
+                                |> Result.mapError Http.BadBody
+                                |> Result.mapError (Tuple.pair (Just (metadata, body_))))
         , timeout =
             Nothing
-        , withCredentials =
-            False
+        , tracker =
+            Nothing
         }
