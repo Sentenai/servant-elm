@@ -104,6 +104,28 @@ spec = do
                                    (Proxy :: Proxy ("one" :> Get '[JSON] Int)))
                   generated `itemsShouldBe` expected
 
+           it "with tasks" $
+               do expected <-
+                      mapM
+                          (\(fpath,header) -> do
+                               source <- T.readFile fpath
+                               return (fpath, header, source))
+                          [ ( "test/elm-sources/getOneWithTasks.elm"
+                            , "module GetOneWithTasks exposing (..)\n\n" <>
+                              "import Http\n" <>
+                              "import Task exposing (Task)\n" <>
+                              "import String.Conversions as String\n" <>
+                              "import Json.Decode exposing (..)\n\n\n")]
+                  let generated =
+                          map
+                              (<> "\n")
+                              (generateElmForAPIWith
+                                   (defElmOptions
+                                    { effectType = Task
+                                    })
+                                   (Proxy :: Proxy ("one" :> Get '[JSON] Int)))
+                  generated `itemsShouldBe` expected
+
 itemsShouldBe :: [Text] -> [(String, Text, Text)] -> IO ()
 itemsShouldBe actual expected =
     zipWithM_

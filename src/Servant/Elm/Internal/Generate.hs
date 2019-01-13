@@ -49,11 +49,18 @@ data ElmOptions = ElmOptions
     -- ^ Types that represent a Bool.
   , charElmTypes        :: [ElmDatatype]
     -- ^ Types that represent a Char.
+  , effectType          :: EffectType
+    -- ^ The type you'd like your generated api functions to return
   }
 
 data UrlPrefix
   = Static T.Text
   | Dynamic
+
+
+data EffectType
+  = Task
+  | Cmd
 
 
 {-|
@@ -77,6 +84,8 @@ The default options are:
 >     [ toElmType True ]
 > , charElmTypes =
 >     [ toElmType '' ]
+> , effectType =
+      Cmd
 > }
 -}
 defElmOptions :: ElmOptions
@@ -101,6 +110,8 @@ defElmOptions = ElmOptions
       [ Elm.toElmType (False :: Bool) ]
   , charElmTypes =
       [ Elm.toElmType (' ' :: Char) ]
+  , effectType =
+        Cmd
   }
 
 
@@ -252,7 +263,14 @@ mkTypeSignature opts request =
       pure (parens ("Result (Maybe (Http.Metadata, String), Http.Error)" <+> parens result <+> "-> msg"))
 
     returnType :: Maybe Doc
-    returnType = pure "Cmd msg"
+    returnType =
+      pure $
+        case effectType opts of
+          Cmd ->
+            "Cmd msg"
+
+          Task ->
+            "Task Never msg"
 
 
 elmHeaderArg :: F.HeaderArg ElmDatatype -> Doc
@@ -367,28 +385,56 @@ mkLetParams opts request =
 
 mkRequest :: ElmOptions -> F.Req ElmDatatype -> Doc
 mkRequest opts request =
-  "Http.request" <$>
+  reqFunction <$>
   indent i
-    (elmRecord
-       [ "method =" <$>
+    (elmRecord . catMaybes $
+       [ Just $
+         "method =" <$>
          indent i (dquotes method)
-       , "headers =" <$>
+       , Just $
+         "headers =" <$>
          indent i
            (elmListOfMaybes headers)
-       , "url =" <$>
+       , Just $
+         "url =" <$>
          indent i url
-       , "body =" <$>
+       , Just $
+         "body =" <$>
          indent i body
-       , "expect =" <$>
-         indent i expect
-       , "timeout =" <$>
+       , case effectType opts of
+            Cmd ->
+              Just $
+              "expect =" <$>
+              indent i expect
+
+            Task ->
+              Just $
+              "resolver =" <$>
+              indent i resolver
+       , Just $
+         "timeout =" <$>
          indent i "Nothing"
-       , "tracker =" <$>
-         indent i "Nothing"
-       ])
+       , case effectType opts of
+           Cmd ->
+              Just $
+              "tracker =" <$>
+              indent i "Nothing"
+           Task ->
+            Nothing
+       ]
+
+    )
   where
     method =
        request ^. F.reqMethod . to (stext . T.decodeUtf8)
+
+    reqFunction =
+      case effectType opts of
+        Cmd ->
+          "Http.request"
+
+        Task ->
+          "(Task.map toMsg << Task.onError (Task.succeed << Err) << Task.map Ok << Http.task)"
 
     mkHeader header =
       let headerName = header ^. F.headerArg . F.argName . to (stext . F.unPathSegment)
@@ -433,13 +479,17 @@ mkRequest opts request =
           in
             "Http.jsonBody" <+> parens (stext encoderName <+> elmBodyArg)
 
-    expect =
+    resolver = parseResponse "Http.stringResolver"
+
+    expect = parseResponse "Http.expectStringResponse toMsg"
+
+    parseResponse parsingFunction =
       case request ^. F.reqReturnType of
         Just elmTypeExpr | isEmptyType opts elmTypeExpr ->
           let elmConstructor =
                 Elm.toElmTypeRefWith (elmExportOptions opts) elmTypeExpr
           in
-          "Http.expectStringResponse toMsg" <$>
+          parsingFunction <$>
           indent i (parens (backslash <> "res" <+> "->" <$>
               indent i "case res of" <$>
               indent i (
@@ -460,7 +510,7 @@ mkRequest opts request =
 
 
         Just elmTypeExpr ->
-          "Http.expectStringResponse toMsg" <$>
+          parsingFunction <$>
           indent i (parens (backslash <> "res" <+> "->" <$>
               indent i "case res of" <$>
               indent i (
