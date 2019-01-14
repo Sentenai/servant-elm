@@ -5,6 +5,7 @@ module Servant.Elm.Internal.Generate where
 
 import           Prelude                      hiding ((<$>))
 import           Control.Lens                 (to, (^.))
+import           Control.Monad                (guard)
 import           Data.Int                     (Int32)
 import           Data.List                    (nub)
 import           Data.Maybe                   (catMaybes)
@@ -61,6 +62,7 @@ data UrlPrefix
 data EffectType
   = Task
   | Cmd
+  deriving (Eq)
 
 
 {-|
@@ -260,17 +262,22 @@ mkTypeSignature opts request =
     msgType :: Maybe Doc
     msgType = do
       result <- fmap elmTypeRef $ request ^. F.reqReturnType
-      pure (parens ("Result (Maybe (Http.Metadata, String), Http.Error)" <+> parens result <+> "-> msg"))
+      guard (effectType opts == Cmd)
+      pure (parens ("Result" <+> errorType <+> parens result <+> "-> msg"))
 
     returnType :: Maybe Doc
     returnType =
-      pure $
-        case effectType opts of
-          Cmd ->
-            "Cmd msg"
+      case effectType opts of
+        Cmd ->
+          pure "Cmd msg"
 
-          Task ->
-            "Task Never msg"
+        Task -> do
+          result <- fmap elmTypeRef $ request ^. F.reqReturnType
+          pure $ "Task" <+> errorType <+> parens result
+
+    errorType :: Doc
+    errorType =
+      "(Maybe (Http.Metadata, String), Http.Error)"
 
 
 elmHeaderArg :: F.HeaderArg ElmDatatype -> Doc
@@ -310,7 +317,11 @@ mkArgs
   -> Doc
 mkArgs opts request =
   (hsep . concat) $
-    [ ["toMsg"]
+    [ case effectType opts of
+        Cmd ->
+          ["toMsg"]
+        Task ->
+          []
     , -- Dynamic url prefix
       case urlPrefix opts of
         Dynamic -> ["urlBase"]
@@ -434,7 +445,7 @@ mkRequest opts request =
           "Http.request"
 
         Task ->
-          "(Task.map toMsg << Task.onError (Task.succeed << Err) << Task.map Ok << Http.task)"
+          "Http.task"
 
     mkHeader header =
       let headerName = header ^. F.headerArg . F.argName . to (stext . F.unPathSegment)

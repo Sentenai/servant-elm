@@ -6,9 +6,9 @@ import String.Conversions as String
 import Json.Decode exposing (..)
 
 
-getOne : (Result (Maybe (Http.Metadata, String), Http.Error) (Int) -> msg) -> Task Never msg
-getOne toMsg =
-    (Task.map toMsg << Task.onError (Task.succeed << Err) << Task.map Ok << Http.task)
+getOne : Task (Maybe (Http.Metadata, String), Http.Error) (Int)
+getOne =
+    Http.task
         { method =
             "GET"
         , headers =
